@@ -92,6 +92,77 @@
 /** CDC Interface callback. */
 extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 
+
+
+/* Enum for different PIO modes */
+typedef enum {
+	ENCODER = 0,
+	INPUT,
+	UNCONFIGURED,
+	LOADCELL
+} PIO_MODE_t;
+
+/* Struct to configure PIO */
+typedef struct {
+	uint32_t task_period;
+	PIO_MODE_t pio_mode;
+	bool enable_flag;
+	bool change_flag;
+} pio_config_t;
+
+/* Struct to configure I2C */
+typedef struct {
+	uint32_t task_period;
+	bool enable_flag;
+	bool change_flag;
+} i2c_config_t;
+
+/* Struct to configure PWM */
+typedef struct {
+	uint32_t task_period;
+	uint16_t pwm1_freq;
+	uint16_t pwm2_freq;
+	uint8_t pwm1_duty;
+	uint8_t pwm2_duty;
+	bool enable_flag1;
+	bool enable_flag2;
+	bool change_flag1;
+	bool change_flag2;
+} pwm_config_t;
+
+/* Struct to configure ADC */
+typedef struct {
+	uint32_t task_period;
+	bool enable_flag;
+	bool change_flag;
+} adc_config_t;
+
+/* Enum for different configuration targets */
+typedef enum {
+	PWM = 0,
+	PIO,
+	ADC,
+	I2C
+} config_target_t;
+
+/* Enum for configuration attributes */
+typedef enum {
+	TOGGLE_TASK = 0,
+	CONFIG_ATT1,
+	CONFIG_ATT2,
+	TASK_FREQ
+} config_attribute_t;
+
+/* Enum for configuration channel */
+typedef enum {
+	PIN_CHANNEL1 = 0,
+	PIN_CHANNEL2
+} config_channel_t;
+
+
+
+
+
 /* USER CODE BEGIN EXPORTED_VARIABLES */
 
 /* USER CODE END EXPORTED_VARIABLES */

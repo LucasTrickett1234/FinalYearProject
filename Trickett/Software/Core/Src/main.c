@@ -27,13 +27,6 @@
 
 
 /* Private define ------------------------------------------------------------*/
-#define STM_LOCAL_USB_ID 0b1001
-
-#define USB_DATA_ID_I2C 0b10011001
-#define USB_DATA_ID_LDC 0b10011011
-#define USB_DATA_ID_ADC 0b10010100
-#define USB_DATA_ID_PIO 0b10010001
-
 #define AHT10_ADDRESS (0x38 << 1) // 0b1110000; Adress[7-bit]Wite/Read[1-bit]
 
 /* Private variables ---------------------------------------------------------*/
@@ -67,14 +60,12 @@ static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM2_Init(void);
 
-//void xTaskPWMHandle(void const * argument);
+
+// void xTaskPWMHandle(void const * argument);
 void xTaskPIOHandle(void const * argument);
 void xTaskI2CHandle(void const * argument);
 void xTaskADCHandle(void const * argument);
 void xTaskUSBHandle(void const * argument);
-
-
-
 
 
 volatile pwm_config_t pwm_context = {
@@ -115,17 +106,18 @@ volatile i2c_config_t i2c_context = {
   * @param  argument: Not used
   * @retval None
   */
-void xTaskPWMHandle(void const * argument)
+void xTaskPWMHandle(void const* argument)
 {
-	const TickType_t xTaskPeriod_ms = pwm_context.task_period;  // 1000 ms for 1000Hz
+	TickType_t xTaskPeriod_ms = pwm_context.task_period;  // 1000 ms for 1000Hz
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
 	for(;;) {
-		osDelay(xTaskPeriod_ms);
+        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 		// Check if the PWM1 peripheral is enabled
 		if (pwm_context.change_flag1) {
 			xTaskPeriod_ms = pwm_context.task_period;
-//			__HAL_TIM_SET_PRESCALER(&htim1, pwm1_freq);
-//			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm1_duty);
+			__HAL_TIM_SET_PRESCALER(&htim1, pwm1_freq);
+			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm1_duty);
 
 			if (pwm_context.enable_flag1) {
 				HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -137,8 +129,8 @@ void xTaskPWMHandle(void const * argument)
 
 		// Check if the PWM2 peripheral is enabled
 		if (pwm_context.change_flag2) {
-//			__HAL_TIM_SET_PRESCALER(&htim3, pwm2_freq);
-//			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm2_duty);
+			__HAL_TIM_SET_PRESCALER(&htim3, pwm2_freq);
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm2_duty);
 
 			if (pwm_context.enable_flag2) {
 				HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
@@ -157,12 +149,13 @@ void xTaskPWMHandle(void const * argument)
   * @param  argument: Not used
   * @retval None
   */
-void xTaskPIOHandle(void const * argument)
+void xTaskPIOHandle(void const* argument)
 {
-    const TickType_t xTaskPeriod_ms = pio_context.task_period;  // 100 ms for 10Hz
+    TickType_t xTaskPeriod_ms = pio_context.task_period;  // 100 ms for 10Hz
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
 	uint8_t buffer[5];
-	buffer[0] = USB_DATA_ID_PIO;
+	buffer[0] =  (STM_LOCAL_USB_ID << 4) | USB_DATA_ID_PIO;
 
     int8_t encoder_count = 0;
     GPIO_PinState State_PB12;
@@ -197,7 +190,7 @@ void xTaskPIOHandle(void const * argument)
 			{
 
 			case ENCODER:
-				osDelay(xTaskPeriod_ms);
+		        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 
 				// The Two PIO pins are to read the encoder for reflection measuring
 				if (State_PB13 != Prev_PB13) {
@@ -219,7 +212,7 @@ void xTaskPIOHandle(void const * argument)
 
 
 			case INPUT:
-				osDelay(xTaskPeriod_ms);
+		        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 				// The Two PIO pins are to read the spare GPIO pins
 				if ((State_PB12 != Prev_PB12) || (State_PB13 != Prev_PB13)) {
 
@@ -238,7 +231,7 @@ void xTaskPIOHandle(void const * argument)
 			case LOADCELL:
 				Count = 0;
 				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
-				osDelay(xTaskPeriod_ms);
+		        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 
 				while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12));
 
@@ -268,75 +261,70 @@ void xTaskPIOHandle(void const * argument)
 
 
 			case UNCONFIGURED:
-				osDelay(xTaskPeriod_ms);
+		        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 				break;
 
 
 			default:
-				osDelay(xTaskPeriod_ms);
+		        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 				break;
 			}
         } else {
-			osDelay(xTaskPeriod_ms);
+            vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
         }
     }
 }
 
+
 /**
-  * @brief  Handles I2C communication with the AHT10 sensor and sends data via USB.
+  * @brief  Relays data between USB and I2C device.
   * @param  argument: Not used
   * @retval None
   */
-void xTaskI2CHandle(void const * argument)
+void xTaskI2CHandle(void const* argument)
 {
-	const TickType_t xTaskPeriod_ms = 10;  // 100 ms for 10Hz
-    uint8_t soft_reset_cmd = 0xBA;
-    uint8_t init_cmd[3] = {0xE1, 0x08, 0x00};  // Calibration command for AHT10
+	TickType_t xTaskPeriod_ms = 10;   // Default polling interval
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    HAL_I2C_Master_Transmit(&hi2c1, AHT10_ADDRESS, &soft_reset_cmd, 1, HAL_MAX_DELAY);
-	osDelay(xTaskPeriod_ms);
+    uint8_t usb_buffer[64];                // Buffer for incoming USB data
+    uint8_t i2c_buffer[64];                // Buffer for I2C communication
+    uint8_t response_buffer[64];           // Buffer for response back to USB
+    uint8_t data_length = 0;               // Length of USB data received
 
-    HAL_I2C_Master_Transmit(&hi2c1, AHT10_ADDRESS, init_cmd, 3, HAL_MAX_DELAY);
-	osDelay(xTaskPeriod_ms);
-
-	uint8_t trigger_measurement_cmd[3] = {0xAC, 0x33, 0x00};
-	uint8_t data[7];
-	data[0] = USB_DATA_ID_I2C;
-
-	uint32_t humidity_raw;
-	uint32_t temperature_raw;
-
-	float humidity;
-	float temperature;
-
-	for (;;) {
+	for (;;)
+	{
+		// Check if the task is enabled
 		if (i2c_context.enable_flag) {
 
-			if (i2c_context.change_flag) {
-				xTaskPeriod_ms = i2c_context.task_period;
-				i2c_context.change_flag = false;
+			// Check if USB data is received
+			data_length = CDC_Receive_FS(usb_buffer, sizeof(usb_buffer));
+			if (data_length > 0) {
+				// Parse USB data
+				uint8_t i2c_address = usb_buffer[0]; // First byte: I2C address
+				uint8_t command_length = usb_buffer[1]; // Second byte: Command length
+				memcpy(i2c_buffer, usb_buffer + 2, command_length); // Copy I2C command
 
+				// Perform I2C operation based on USB command
+				if (usb_buffer[0] & 0x80) {
+					// MSB of I2C address set: Write operation
+					HAL_I2C_Master_Transmit(&hi2c1, i2c_address & 0x7F, i2c_buffer, command_length, HAL_MAX_DELAY);
+				} else {
+					// Read operation
+					uint8_t read_length = command_length; // Length specifies bytes to read
+					if (HAL_I2C_Master_Receive(&hi2c1, i2c_address, response_buffer, read_length, HAL_MAX_DELAY) == HAL_OK) {
+						// Send response back via USB
+						osMutexWait(usb_mutexHandle, portMAX_DELAY);
+						CDC_Transmit_FS(response_buffer, read_length);
+						osMutexRelease(usb_mutexHandle);
+					}
+				}
 			}
-
-			HAL_I2C_Master_Transmit(&hi2c1, AHT10_ADDRESS, trigger_measurement_cmd, 3, HAL_MAX_DELAY);
-			osDelay(xTaskPeriod_ms);
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-			// Read 6 bytes of data from the AHT10
-			if (HAL_I2C_Master_Receive(&hi2c1, AHT10_ADDRESS, data+1, 6, HAL_MAX_DELAY) == HAL_OK) {
-
-			}
-
-			// Check if the sensor is busy
-			if ((data[1] & 0x80) == 0) {
-				osMutexWait(usb_mutexHandle, 10);
-				CDC_Transmit_FS(data, 7);  // Transmit 7 bytes (buffer contains I2C ID + data)
-				osMutexRelease(usb_mutexHandle);
-			}
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 		}
+
+		// Add periodic delay to allow for other tasks to run
+        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 	}
 }
-
 
 
 
@@ -345,12 +333,13 @@ void xTaskI2CHandle(void const * argument)
   * @param  argument: Not used
   * @retval None
   */
-void xTaskADCHandle(void const * argument)
+void xTaskADCHandle(void const* argument)
 {
-	const TickType_t xTaskPeriod_ms = adc_context.task_period;
+	TickType_t xTaskPeriod_ms = adc_context.task_period;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
 	char buffer[7];
-	buffer[0] = USB_DATA_ID_ADC;
+	buffer[0] =  (STM_LOCAL_USB_ID << 4) | USB_DATA_ID_ADC;
 
 	uint16_t adc1_val;
 	uint16_t adc2_val;
@@ -359,7 +348,7 @@ void xTaskADCHandle(void const * argument)
 	/* Infinite loop */
 	for(;;) {
 		// Block until the next execution time to maintain execution rate
-		osDelay(xTaskPeriod_ms);
+        vTaskDelayUntil(&xLastWakeTime, xTaskPeriod_ms);
 
 		if (adc_context.enable_flag) {
 			if (adc_context.change_flag) {
@@ -371,17 +360,17 @@ void xTaskADCHandle(void const * argument)
 			adc2_val = dma_normal_adc_buffer[1];
 			adc3_val = dma_normal_adc_buffer[2];
 
-	//	    while (HAL_ADC_ConvCpltCallback(&hadc1));
-//			buffer[1] = (uint8_t)(dma_normal_adc_buffer[0]  >> 8);   // High byte of adc1
-//			buffer[2] = (uint8_t)(dma_normal_adc_buffer[0] & 0xFF); // Low byte of adc1
-//
-//			// Map adc2 to buffer
-//			buffer[3] = (uint8_t)(dma_normal_adc_buffer[1] >> 8);   // High byte of adc2
-//			buffer[4] = (uint8_t)(dma_normal_adc_buffer[1] & 0xFF); // Low byte of adc2
-//
-//			// Map adc3 to buffer
-//			buffer[5] = (uint8_t)(dma_normal_adc_buffer[2] >> 8);   // High byte of adc3
-//			buffer[6] = (uint8_t)(dma_normal_adc_buffer[2] & 0xFF); // Low byte of adc3
+		    while (HAL_ADC_ConvCpltCallback(&hadc1));
+			buffer[1] = (uint8_t)(adc1_val  >> 8);   // High byte of adc1
+			buffer[2] = (uint8_t)(adc1_val & 0xFF); // Low byte of adc1
+
+			// Map adc2 to buffer
+			buffer[3] = (uint8_t)(adc2_val >> 8);   // High byte of adc2
+			buffer[4] = (uint8_t)(adc2_val & 0xFF); // Low byte of adc2
+
+			// Map adc3 to buffer
+			buffer[5] = (uint8_t)(adc3_val >> 8);   // High byte of adc3
+			buffer[6] = (uint8_t)(adc3_val & 0xFF); // Low byte of adc3
 
 
 			// Send usb data through mutex, timeout of 10ms
@@ -424,11 +413,11 @@ int main(void)
 	osThreadDef(xTaskI2C, xTaskI2CHandle, osPriorityNormal, 1, 128);
 	xTask_I2CHandle = osThreadCreate(osThread(xTaskI2C), NULL);
 
-//	/* definition and creation of xTask_GPIO */
+	/* definition and creation of xTask_GPIO */
 	osThreadDef(xTask_PIO, xTaskPIOHandle, osPriorityNormal, 0, 128);
 	xTask_PIOHandle = osThreadCreate(osThread(xTask_ADC), NULL);
 
-//	/* definition and creation of xTask_PWM */
+	/* definition and creation of xTask_PWM */
 	osThreadDef(xTask_PWM, xTaskPWMHandle, osPriorityNormal, 0, 128);
 	xTask_PWMHandle = osThreadCreate(osThread(xTask_PWM), NULL);
 
@@ -465,6 +454,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL6;
+
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -483,14 +473,17 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC|RCC_PERIPHCLK_USB;
   PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV4;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL;
+
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
 }
+
 
 /**
   * @brief ADC1 Initialization Function
@@ -501,8 +494,7 @@ static void MX_ADC1_Init(void)
 {
   ADC_ChannelConfTypeDef sConfig = {0};
 
-  /** Common config
-  */
+  /** Common config **/
   hadc1.Instance = ADC1;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
   hadc1.Init.ContinuousConvMode = ENABLE;
@@ -510,13 +502,13 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 3;
+
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Configure Regular Channel
-  */
+  /** Configure Regular Channel **/
   sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
@@ -525,24 +517,25 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
 
-  /** Configure Regular Channel
-  */
+  /** Configure Regular Channel **/
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = ADC_REGULAR_RANK_2;
+
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Configure Regular Channel
-  */
+  /** Configure Regular Channel **/
   sConfig.Channel = ADC_CHANNEL_5;
   sConfig.Rank = ADC_REGULAR_RANK_3;
+
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
 }
+
 
 /**
   * @brief I2C1 Initialization Function
@@ -560,11 +553,13 @@ static void MX_I2C1_Init(void)
   hi2c1.Init.OwnAddress2 = 0;
   hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
   hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
   if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
     Error_Handler();
   }
 }
+
 
 /**
   * @brief TIM1 Initialization Function
@@ -670,6 +665,7 @@ static void MX_TIM2_Init(void)
   }
 }
 
+
 /**
   * @brief TIM3 Initialization Function
   * @param None
@@ -710,6 +706,7 @@ static void MX_TIM3_Init(void)
   HAL_TIM_MspPostInit(&htim3);
 }
 
+
 /**
   * Enable DMA controller clock
   */
@@ -725,6 +722,7 @@ static void MX_DMA_Init(void)
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
+
 
 /**
   * @brief GPIO Initialization Function
@@ -784,6 +782,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
 }
 
+
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
@@ -796,6 +795,7 @@ void Error_Handler(void)
   {
   }
 }
+
 
 #ifdef  USE_FULL_ASSERT
 /**

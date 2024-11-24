@@ -18,79 +18,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Local STM32 ID for USB communication
+// * To be set to a different ID when programming different boards
+#define STM_LOCAL_USB_ID 0b1001 // The local ID of the STM32
+
+
 
 /* Definitions for USB data identifiers and configuration IDs */
-#define STM_LOCAL_USB_ID 0b1001
-#define STM32_CONFIG_ID 0b10010000
-#define USB_DATA_ID_I2C 0b10011001
-#define USB_DATA_ID_ADC 0b10010100
-#define USB_DATA_ID_PIO 0b10010001
-#define USB_DATA_ID_PWM 0b10011101
+#define STM32_CONFIG_ID  0b0000
+#define USB_DATA_ID_I2C  0b1001
+#define USB_DATA_ID_ADC  0b0100
+#define USB_DATA_ID_PIO  0b0001
+#define USB_DATA_ID_PWM  0b1101
 
-/* Enum for different PIO modes */
-typedef enum {
-	ENCODER = 0,
-	INPUT,
-	UNCONFIGURED,
-	LOADCELL
-} PIO_MODE_t;
-
-/* Struct to configure PIO */
-typedef struct {
-	uint32_t task_period;
-	PIO_MODE_t pio_mode;
-	bool enable_flag;
-	bool change_flag;
-} pio_config_t;
-
-/* Struct to configure I2C */
-typedef struct {
-	uint32_t task_period;
-	bool enable_flag;
-	bool change_flag;
-} i2c_config_t;
-
-/* Struct to configure PWM */
-typedef struct {
-	uint32_t task_period;
-	uint16_t pwm1_freq;
-	uint16_t pwm2_freq;
-	uint8_t pwm1_duty;
-	uint8_t pwm2_duty;
-	bool enable_flag1;
-	bool enable_flag2;
-	bool change_flag1;
-	bool change_flag2;
-} pwm_config_t;
-
-/* Struct to configure ADC */
-typedef struct {
-	uint32_t task_period;
-	bool enable_flag;
-	bool change_flag;
-} adc_config_t;
-
-/* Enum for different configuration targets */
-typedef enum {
-	PWM = 0,
-	PIO,
-	ADC,
-	I2C
-} config_target_t;
-
-/* Enum for configuration attributes */
-typedef enum {
-	TOGGLE_TASK = 0,
-	CONFIG_ATT1,
-	CONFIG_ATT2,
-	TASK_FREQ
-} config_attribute_t;
-
-/* Enum for configuration channel */
-typedef enum {
-	PIN_CHANNEL1 = 0,
-	PIN_CHANNEL2
-} config_channel_t;
 
 /* External variables for different configuration contexts */
 extern pwm_config_t pwm_context;
@@ -120,7 +60,12 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS = {
   CDC_Receive_FS
 };
 
-/* Initialize CDC media layer over USB FS */
+
+/**
+  * @brief  Initializes the USB CDC media layer.
+  *         Sets up TX and RX buffers for USB communication.
+  * @retval USBD_OK if initialization is successful.
+  */
 static int8_t CDC_Init_FS(void)
 {
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);  // Set TX buffer
@@ -128,13 +73,26 @@ static int8_t CDC_Init_FS(void)
   return (USBD_OK);
 }
 
-/* Deinitialize CDC media layer */
+
+/**
+  * @brief  Deinitializes the USB CDC media layer.
+  *         Called when the USB CDC is no longer needed.
+  * @retval USBD_OK if deinitialization is successful.
+  */
 static int8_t CDC_DeInit_FS(void)
 {
   return (USBD_OK);
 }
 
-/* Handle CDC class requests */
+
+/**
+  * @brief  Handles USB CDC class-specific control requests.
+  *         Processes commands such as setting line coding, control line state, etc.
+  * @param  cmd: Command code (e.g., CDC_SET_LINE_CODING).
+  * @param  pbuf: Buffer containing the request data.
+  * @param  length: Length of the request data in bytes.
+  * @retval USBD_OK if the command is successfully processed.
+  */
 static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 {
   switch(cmd)
@@ -163,16 +121,12 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 
   switch(Buf[0])
   {
-    case USB_DATA_ID_I2C:
+    case (STM_LOCAL_USB_ID << 4) | USB_DATA_ID_I2C:
       xTaskI2C_flag = true;
       break;
 
-    case STM32_CONFIG_ID:  // Handle peripheral configuration
+    case (STM_LOCAL_USB_ID << 4) | STM32_CONFIG_ID:  // Handle peripheral configuration
       configure_peripheral_context(Buf[1] & 0x3F, Buf[2]);
-      break;
-
-    case 'a':  // Debugging case for USB data
-      xTaskADC_flag = true;
       break;
 
     default:
@@ -182,13 +136,18 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   return (USBD_OK);
 }
 
+
+/**
+  * @brief  Handles data received over the USB CDC interface.
+  *         Processes data based on its identifier (e.g., I2C, ADC).
+  * @param  Buf: Pointer to the buffer containing received data.
+  * @param  Len: Pointer to the length of received data.
+  * @retval USBD_OK if data is successfully processed.
+  */
 void configure_peripheral_context(uint8_t config_message, uint8_t config_data)
 {
 	switch(config_message)
 	{
-	case '2':
-		// Purely for debugging purposes
-		break;
 	case ((PWM<<4)|(TOGGLE_TASK<<2)|(PIN_CHANNEL1)):
 		// Toggle PWM1
 		pwm_context.enable_flag1 = !pwm_context.enable_flag1;
@@ -302,8 +261,6 @@ void configure_peripheral_context(uint8_t config_message, uint8_t config_data)
 		  break;
 	}
 }
-
-
 
 
 /**
